@@ -3,15 +3,19 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, Integer, String, Float
 import os
 from flask_marshmallow import Marshmallow
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token
 
 
 app = Flask(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'planets.db')
-
+app.config['JWT_SECRET_KEY'] = 'super-secret'  # Change this!
+#app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
+jwt = JWTManager(app)
+
 
 @app.cli.command('db_create')
 def db_create():
@@ -86,6 +90,7 @@ def parameters():
     else:
         return jsonify(message="Welcome " + name + ", you are old enough!")
 
+
 @app.route('/url_variables/<string:name>/<int:age>')
 def url_variables(name: str, age: int):
     if age < 18:
@@ -93,10 +98,45 @@ def url_variables(name: str, age: int):
     else:
         return jsonify(message="Welcome " + name + ", you are old enough!")
 
+
 @app.route('/planets', methods=['GET'])
 def planets():
     planets_list = Planet.query.all()
-    return jsonify(data=planets_list)
+    result = planets_schema.dump(planets_list)
+    return jsonify(result)
+
+
+@app.route('/register', methods=['POST'])
+def register():
+    email = request.form['email']
+    test = User.query.filter_by(email=email).first()
+    if test:
+        return jsonify(message='That email already exists.'), 409
+    else:
+        first_name = request.form['first_name']
+        last_name = request.form['last_name']
+        password = request.form['password']
+        user = User(first_name=first_name, last_name=last_name, email=email, password=password)
+        db.session.add(user)
+        db.session.commit()
+        return jsonify(message="User created successfully."), 201 # creted new record
+
+
+@app.route('/login', methods=['POST'])
+def login():
+    if request.is_json:
+        email = request.json['email']
+        password = request.json['password']
+    else:
+        email = request.form['email']
+        password = request.form['password']
+
+    test = User.query.filter_by(email=email, password=password).first()
+    if test:
+        access_token = create_access_token(identity=email)
+        return jsonify(message="Login succeeded!", access_token=access_token)
+    else:
+        return jsonify(message="Bad email or password"), 401
 
 
 # database models
@@ -118,7 +158,6 @@ class Planet(db.Model):
     mass = Column(Float)
     radius = Column(Float)
     distance = Column(Float)
-
 
 class UserSchema(ma.Schema):
     class Meta:
